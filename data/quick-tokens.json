@@ -28,5 +28,25 @@
     "userId": "user-admin-shifin",
     "deviceFingerprint": "dev_7ede0337_w3sgpjnp",
     "createdAt": 1789384752809
+  },
+  "ninimo-qk-12c62d9ef1475812a32dcec2e406f965289b6b4bec94cde1": {
+    "userId": "user-1789493618826-3e0tan",
+    "deviceFingerprint": "ip_127_0_0_1",
+    "createdAt": 1789493618827
+  },
+  "ninimo-qk-55c1e56769ba6205e59b5b7724e3b31007241b726853226e": {
+    "userId": "user-admin-shifin",
+    "deviceFingerprint": "ip_127_0_0_1",
+    "createdAt": 1789493633167
+  },
+  "ninimo-qk-b26c941a783288a247231f3e086f34aef3bf703a7f6ea924": {
+    "userId": "user-admin-shifin",
+    "deviceFingerprint": "ip_127_0_0_1",
+    "createdAt": 1789493948766
+  },
+  "ninimo-qk-5bd11cd5029ff13c7b104eec82fe45688a70f16463ffa122": {
+    "userId": "SA4PxloJmph6WFRylBn3F7qfAaq1",
+    "deviceFingerprint": "ip_127_0_0_1",
+    "createdAt": 1789493962123
   }
 }

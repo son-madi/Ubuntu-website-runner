@@ -114,6 +114,25 @@ interface LivePlatformCounterProps {
   onForgetQuickLogin?: () => void;
 }
 
+// Helper to safely parse API responses and prevent "Unexpected token '<', <!DOCTYPE" errors
+async function safeParseResponse(res: Response): Promise<{ ok: boolean; data: any }> {
+  const text = await res.text();
+  let data: any = {};
+  try {
+    data = JSON.parse(text);
+  } catch {
+    if (!res.ok) {
+      const isHtml = text.includes('<!DOCTYPE') || text.includes('<html');
+      throw new Error(
+        isHtml
+          ? `Server returned HTTP ${res.status} (${res.statusText || 'Error'}). Please retry in a moment.`
+          : text.slice(0, 160) || `Request failed with status ${res.status}`
+      );
+    }
+  }
+  return { ok: res.ok, data };
+}
+
 export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
   publicStats,
   onAuthSuccess,
@@ -176,8 +195,8 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
+      const { ok, data } = await safeParseResponse(res);
+      if (!ok) {
         throw new Error(data.error || 'Server authentication failed');
       }
 
@@ -193,6 +212,11 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
       }
     } catch (err: any) {
       if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        return;
+      }
+      if (err.code === 'auth/unauthorized-domain') {
+        const hostname = window.location.hostname || 'current domain';
+        setError(`Google popup authentication requires "${hostname}" to be whitelisted in Firebase Console (Authorized Domains). You can sign in using your account credentials or admin login.`);
         return;
       }
       console.error('Google Sign-in Error:', err);
@@ -225,8 +249,13 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
         body: JSON.stringify(body),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
+      const { ok, data } = await safeParseResponse(res);
+      if (!ok) {
+        if (mode === 'signup' && (data.error?.includes('already taken') || data.error?.includes('already registered'))) {
+          if (username.toLowerCase() === 'shifin' || email.toLowerCase().includes('shifin')) {
+            throw new Error('Admin account for Shifin already exists! Please click Sign In to log in.');
+          }
+        }
         throw new Error(data.error || 'Authentication failed');
       }
 

@@ -17,8 +17,8 @@
     "passwordHash": "f61410abb42ff8a8a0a4af557ac71ed1370ce49c1d7b25a091598b2c6d3005a517e80b7dc323f3a37128d6fa0f75059bb3363a7adadc424ac9a08d9a11a55ba6",
     "salt": "4c96271f64342f4e915dbe156ebd2d88",
     "isAdmin": true,
-    "registrationIp": "59.182.139.1",
-    "deviceFingerprint": "dev_7ede0337_w3sgpjnp",
+    "registrationIp": "127.0.0.1",
+    "deviceFingerprint": "ip_127_0_0_1",
     "createdAt": 1700000000000,
     "plainPassword": "0508552513",
     "photoURL": "https://lh3.googleusercontent.com/a/ACg8ocJe4LAEPPIYhKnYyJiWc9GGNEc4-EsjUWfKdDzpjM9u2A-SY_9Geg=s96-c"
@@ -44,9 +44,23 @@
     "normalizedEmail": "shifin67e@gmail.com",
     "passwordHash": "946b6cf8cb43bab2fb404d20f12215ada419495c25a537f3ff2980d69558a12284b3869fec05a8c2261b4ac27d8cf389217a63dd9c7a4f7012efdaee78efe224",
     "salt": "e3865a47cc5f16177d1336466d19aeaf",
+    "isAdmin": true,
+    "registrationIp": "127.0.0.1",
+    "deviceFingerprint": "ip_127_0_0_1",
+    "createdAt": 1789382645021,
+    "plainPassword": "0508552513"
+  },
+  {
+    "id": "user-1789493618826-3e0tan",
+    "username": "testuser123",
+    "email": "test1234@test.com",
+    "normalizedEmail": "test1234@test.com",
+    "passwordHash": "fee949e2262630e0193fc73728b9569d609dc4b7151a54ba34c70169cf76343a44c7ba900aa7ca8558ece9aa68735504811e25d7ed0edf06b5833e6ddb14f4f6",
+    "salt": "29db663815a3a5ee80e20d2d3163f97c",
+    "plainPassword": "password123",
     "isAdmin": false,
-    "registrationIp": "59.182.139.1",
-    "deviceFingerprint": "dev_7ede0337_w3sgpjnp",
-    "createdAt": 1789382645021
+    "registrationIp": "127.0.0.1",
+    "deviceFingerprint": "ip_127_0_0_1",
+    "createdAt": 1789493618826
   }
 ]

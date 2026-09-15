@@ -18,17 +18,17 @@ import {
   getDoc,
   deleteDoc,
 } from 'firebase/firestore';
+import firebaseConfigJson from '../../firebase-applet-config.json';
 
-// Default config loaded from firebase-applet-config.json or environment variables
 const env = (import.meta as any).env || {};
 
 export const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || 'AIzaSyAaPeUclSEKMGfX_TeECDtK4IXaTnpHXUU',
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || 'gen-lang-client-0122011124.firebaseapp.com',
-  projectId: env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0122011124',
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || 'gen-lang-client-0122011124.firebasestorage.app',
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '599754889812',
-  appId: env.VITE_FIREBASE_APP_ID || '1:599754889812:web:2daf28116eb072ce88abc1',
+  apiKey: env.VITE_FIREBASE_API_KEY || firebaseConfigJson.apiKey,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigJson.authDomain,
+  projectId: env.VITE_FIREBASE_PROJECT_ID || firebaseConfigJson.projectId,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigJson.storageBucket,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigJson.messagingSenderId,
+  appId: env.VITE_FIREBASE_APP_ID || firebaseConfigJson.appId,
 };
 
 // Initialize Firebase App singleton
@@ -39,8 +39,10 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-// Initialize Firestore
-export const db = getFirestore(app);
+// Initialize Firestore with specific database ID if defined in configuration
+export const db = firebaseConfigJson.firestoreDatabaseId && firebaseConfigJson.firestoreDatabaseId !== '(default)'
+  ? getFirestore(app, firebaseConfigJson.firestoreDatabaseId)
+  : getFirestore(app);
 
 /**
  * Sync user profile to Firestore `/users/{uid}`
@@ -50,6 +52,12 @@ export async function syncUserToFirestore(user: FirebaseUser, customUsername?: s
     const userRef = doc(db, 'users', user.uid);
     const existing = await getDoc(userRef);
     const username = customUsername || user.displayName || user.email?.split('@')[0] || `User_${user.uid.slice(0, 6)}`;
+    const emailLower = (user.email || '').toLowerCase();
+    const isAdmin =
+      emailLower === 'shifinkallan16@gmail.com' ||
+      emailLower === 'gamershifin75@gmail.com' ||
+      emailLower === 'shifin67e@gmail.com' ||
+      username.toLowerCase() === 'shifin';
     
     if (!existing.exists()) {
       await setDoc(userRef, {
@@ -57,7 +65,7 @@ export async function syncUserToFirestore(user: FirebaseUser, customUsername?: s
         username,
         email: user.email || '',
         photoURL: user.photoURL || '',
-        isAdmin: false,
+        isAdmin,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -67,6 +75,7 @@ export async function syncUserToFirestore(user: FirebaseUser, customUsername?: s
         {
           updatedAt: new Date().toISOString(),
           ...(user.photoURL ? { photoURL: user.photoURL } : {}),
+          ...(isAdmin ? { isAdmin: true } : {}),
         },
         { merge: true }
       );

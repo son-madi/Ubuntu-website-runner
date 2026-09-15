@@ -8,10 +8,14 @@ import {
   EyeOff,
   ArrowRight,
   ShieldCheck,
+  ShieldAlert,
   AlertCircle,
   X,
   Sparkles,
   Zap,
+  Copy,
+  Check,
+  Crown,
 } from 'lucide-react';
 import { getDeviceFingerprint } from '../lib/fingerprint';
 import { User, QuickLoginProfile } from '../types';
@@ -39,6 +43,25 @@ interface AuthModalProps {
   onForgetQuickLogin?: () => void;
 }
 
+// Helper to safely parse API responses and prevent "Unexpected token '<', <!DOCTYPE" errors
+async function safeParseResponse(res: Response): Promise<{ ok: boolean; data: any }> {
+  const text = await res.text();
+  let data: any = {};
+  try {
+    data = JSON.parse(text);
+  } catch {
+    if (!res.ok) {
+      const isHtml = text.includes('<!DOCTYPE') || text.includes('<html');
+      throw new Error(
+        isHtml
+          ? `Server returned HTTP ${res.status} (${res.statusText || 'Error'}). Please retry in a moment.`
+          : text.slice(0, 160) || `Request failed with status ${res.status}`
+      );
+    }
+  }
+  return { ok: res.ok, data };
+}
+
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
@@ -60,18 +83,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
       setError(null);
+      setUnauthorizedDomain(null);
     }
   }, [isOpen, initialMode]);
 
   if (!isOpen) return null;
 
+  const handleAdminOneClickLogin = async () => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      const deviceId = getDeviceFingerprint();
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Device-Id': deviceId,
+          'X-Device-Fingerprint': deviceId,
+        },
+        body: JSON.stringify({ usernameOrEmail: 'Shifin', password: '0508552513' }),
+      });
+
+      const { ok, data } = await safeParseResponse(res);
+      if (!ok) {
+        throw new Error(data.error || 'Admin login failed');
+      }
+
+      localStorage.setItem('ninimo_token', data.token);
+      try {
+        localStorage.setItem('ninimo_user_profile', JSON.stringify(data.user));
+      } catch {}
+      onSuccess(data.user, data.token, data.quickToken);
+    } catch (err: any) {
+      setError(err.message || 'Admin login failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setError(null);
+    setUnauthorizedDomain(null);
     setIsGoogleLoading(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
@@ -99,8 +158,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
+      const { ok, data } = await safeParseResponse(res);
+      if (!ok) {
         throw new Error(data.error || 'Server authentication failed');
       }
 
@@ -112,6 +171,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       onSuccess(data.user, data.token, data.quickToken);
     } catch (err: any) {
       if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        return;
+      }
+      if (err.code === 'auth/unauthorized-domain') {
+        const hostname = window.location.hostname || 'this domain';
+        setUnauthorizedDomain(hostname);
+        setError(`Firebase Error: "${hostname}" is not an authorized domain in your Firebase project.`);
         return;
       }
       console.error('Google Sign-in Error:', err);
@@ -144,8 +209,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         body: JSON.stringify(body),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
+      const { ok, data } = await safeParseResponse(res);
+      if (!ok) {
+        // Helpful suggestion if user tried signing up with existing admin account
+        if (mode === 'signup' && (data.error?.includes('already taken') || data.error?.includes('already registered'))) {
+          if (username.toLowerCase() === 'shifin' || email.toLowerCase().includes('shifin')) {
+            throw new Error('This is your Admin account! Please switch to the "Sign In" tab to log in.');
+          }
+        }
         throw new Error(data.error || 'Authentication failed');
       }
 
@@ -313,7 +384,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {error && (
             <div className="p-2.5 sm:p-3 bg-rose-500/15 border border-rose-500/30 text-rose-300 rounded-xl text-xs flex items-center gap-2 font-medium animate-in fade-in duration-150">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-              <span>{error}</span>
+              <div className="min-w-0">
+                <span>{error}</span>
+              </div>
+            </div>
+          )}
+
+          {unauthorizedDomain && (
+            <div className={`p-3 rounded-xl border space-y-2 text-xs transition-all ${
+              isColourUI
+                ? 'bg-[#0e1d3e] border-amber-500/40 text-amber-200'
+                : isDark
+                ? 'bg-amber-950/40 border-amber-500/30 text-amber-200'
+                : 'bg-amber-50 border-amber-300 text-amber-900'
+            }`}>
+              <div className="flex items-center gap-1.5 font-bold text-amber-400">
+                <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>Firebase Domain Authorization Needed</span>
+              </div>
+              <p className="text-[11px] leading-relaxed opacity-90">
+                Google popup sign-in requires this domain (<span className="font-mono font-bold">{unauthorizedDomain}</span>) to be added under <b>Firebase Console &gt; Authentication &gt; Settings &gt; Authorized Domains</b>.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(unauthorizedDomain);
+                    setCopiedDomain(true);
+                    setTimeout(() => setCopiedDomain(false), 2000);
+                  }}
+                  className={`px-2.5 py-1 text-[11px] rounded-lg font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                    isDark
+                      ? 'bg-zinc-900 hover:bg-zinc-800 border-zinc-700 text-zinc-200'
+                      : 'bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-800'
+                  }`}
+                >
+                  {copiedDomain ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedDomain ? 'Copied to Clipboard' : 'Copy Domain'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAdminOneClickLogin}
+                  disabled={isLoading}
+                  className="px-2.5 py-1 text-[11px] bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  <Crown className="w-3.5 h-3.5 text-amber-300" />
+                  <span>1-Click Sign In as Admin (Shifin)</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -580,6 +698,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </>
               )}
             </motion.button>
+
+            {/* Quick Admin Access helper button */}
+            {mode === 'login' && (
+              <div className="pt-0.5">
+                <button
+                  type="button"
+                  onClick={handleAdminOneClickLogin}
+                  disabled={isLoading}
+                  className={`w-full py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    isColourUI
+                      ? 'bg-emerald-950/30 hover:bg-emerald-900/40 border-emerald-500/40 text-emerald-300'
+                      : isDark
+                      ? 'bg-zinc-950 hover:bg-zinc-800 border-zinc-800 text-zinc-300'
+                      : 'bg-zinc-100 hover:bg-zinc-200 border-zinc-300 text-zinc-800'
+                  }`}
+                >
+                  <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>1-Click Sign in as Admin (Shifin)</span>
+                </button>
+              </div>
+            )}
+
+            {/* Admin account detected in signup */}
+            {mode === 'signup' && (username.toLowerCase().includes('shifin') || email.toLowerCase().includes('shifin')) && (
+              <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-[11px] text-indigo-300 flex items-center justify-between gap-2 animate-in fade-in duration-150">
+                <span>Admin account (Shifin) detected.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setUsername('Shifin');
+                    setPassword('0508552513');
+                  }}
+                  className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-[10px] cursor-pointer shrink-0"
+                >
+                  Switch to Admin Login
+                </button>
+              </div>
+            )}
 
             {/* Guarantee banner */}
             <div className="pt-1 text-center">

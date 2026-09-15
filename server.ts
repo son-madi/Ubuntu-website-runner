@@ -111,6 +111,14 @@ async function startServer() {
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
+  // Catch body parser syntax errors early and return JSON
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+      return res.status(400).json({ error: 'Malformed JSON payload' });
+    }
+    next(err);
+  });
+
   // Helper auth extraction
   function getAuthUser(req: express.Request) {
     const authHeader = req.headers.authorization;
@@ -915,6 +923,22 @@ async function startServer() {
       status: 'active',
       railwayDomain: process.env.RAILWAY_PUBLIC_DOMAIN || null,
     });
+  });
+
+  // Ensure that all unmatched /api/* routes return 404 JSON, NEVER Vite index.html or HTML!
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+  });
+
+  // Global error handler for API requests to ensure JSON response instead of Express HTML error page
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path.startsWith('/api/')) {
+      const status = err.status || err.statusCode || 500;
+      return res.status(status).json({
+        error: err.message || 'Server error occurred',
+      });
+    }
+    next(err);
   });
 
   // Vite middleware setup (development mode in AI Studio or PC/Linux dev) vs static files (production / Railway)
