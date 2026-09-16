@@ -15,7 +15,6 @@ import {
   Zap,
   Copy,
   Check,
-  Crown,
   ExternalLink,
 } from 'lucide-react';
 import { getDeviceFingerprint } from '../lib/fingerprint';
@@ -96,38 +95,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   }, [isOpen, initialMode]);
 
   if (!isOpen) return null;
-
-  const handleAdminOneClickLogin = async () => {
-    setError(null);
-    setIsLoading(true);
-    try {
-      const deviceId = getDeviceFingerprint();
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Device-Id': deviceId,
-          'X-Device-Fingerprint': deviceId,
-        },
-        body: JSON.stringify({ usernameOrEmail: 'Shifin', password: '0508552513' }),
-      });
-
-      const { ok, data } = await safeParseResponse(res);
-      if (!ok) {
-        throw new Error(data.error || 'Admin login failed');
-      }
-
-      localStorage.setItem('ninimo_token', data.token);
-      try {
-        localStorage.setItem('ninimo_user_profile', JSON.stringify(data.user));
-      } catch {}
-      onSuccess(data.user, data.token, data.quickToken);
-    } catch (err: any) {
-      setError(err.message || 'Admin login failed');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleGoogleSignIn = async () => {
     setError(null);
@@ -454,15 +421,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Open Firebase Settings</span>
                 </a>
-                <button
-                  type="button"
-                  onClick={handleAdminOneClickLogin}
-                  disabled={isLoading}
-                  className="px-2.5 py-1 text-[11px] bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
-                >
-                  <Crown className="w-3.5 h-3.5 text-amber-300" />
-                  <span>1-Click Sign In as Admin (Shifin)</span>
-                </button>
               </div>
             </div>
           )}
@@ -730,45 +688,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </>
               )}
             </motion.button>
-
-            {/* Quick Admin Access helper button */}
-            {mode === 'login' && (
-              <div className="pt-0.5">
-                <button
-                  type="button"
-                  onClick={handleAdminOneClickLogin}
-                  disabled={isLoading}
-                  className={`w-full py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    isColourUI
-                      ? 'bg-emerald-950/30 hover:bg-emerald-900/40 border-emerald-500/40 text-emerald-300'
-                      : isDark
-                      ? 'bg-zinc-950 hover:bg-zinc-800 border-zinc-800 text-zinc-300'
-                      : 'bg-zinc-100 hover:bg-zinc-200 border-zinc-300 text-zinc-800'
-                  }`}
-                >
-                  <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>1-Click Sign in as Admin (Shifin)</span>
-                </button>
-              </div>
-            )}
-
-            {/* Admin account detected in signup */}
-            {mode === 'signup' && (username.toLowerCase().includes('shifin') || email.toLowerCase().includes('shifin')) && (
-              <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-[11px] text-indigo-300 flex items-center justify-between gap-2 animate-in fade-in duration-150">
-                <span>Admin account (Shifin) detected.</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('login');
-                    setUsername('Shifin');
-                    setPassword('0508552513');
-                  }}
-                  className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-[10px] cursor-pointer shrink-0"
-                >
-                  Switch to Admin Login
-                </button>
-              </div>
-            )}
 
             {/* Guarantee banner */}
             <div className="pt-1 text-center">

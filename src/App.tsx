@@ -275,14 +275,39 @@ export default function App() {
   }, []);
 
   const handleQuickLogin = async () => {
-    if (!quickLoginUser) {
-      showToast('No previous session found on this device');
+    let target = quickLoginUser;
+    if (!target) {
+      try {
+        const raw = localStorage.getItem('ninimo_quick_login');
+        if (raw) target = JSON.parse(raw);
+        else {
+          const cachedProfile = localStorage.getItem('ninimo_user_profile');
+          if (cachedProfile) {
+            const u = JSON.parse(cachedProfile);
+            if (u?.id && u?.username) {
+              target = {
+                id: u.id,
+                username: u.username,
+                email: u.email || '',
+                lastLoginTime: Date.now(),
+                quickToken: localStorage.getItem('ninimo_quick_token') || undefined,
+                isAdmin: !!u.isAdmin,
+                isTester: !!u.isTester,
+              };
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (!target) {
+      showToast('No saved session found on this device');
       return;
     }
     setIsQuickLoggingIn(true);
     try {
       const deviceFingerprint = getDeviceFingerprint();
-      const quickToken = quickLoginUser.quickToken || localStorage.getItem('ninimo_quick_token');
+      const quickToken = target.quickToken || localStorage.getItem('ninimo_quick_token');
       const res = await fetch('/api/auth/quick-login', {
         method: 'POST',
         headers: {
@@ -292,7 +317,7 @@ export default function App() {
         },
         body: JSON.stringify({
           quickToken,
-          userId: quickLoginUser.id,
+          userId: target.id,
           deviceFingerprint,
         }),
       });
@@ -321,12 +346,11 @@ export default function App() {
       saveQuickLoginProfile(data.user, data.quickToken);
       setCurrentUser(data.user);
       setIsAuthModalOpen(false);
-      showToast(`Quick login successful! Welcome back, ${data.user.username}!`);
+      showToast(`Welcome back, ${data.user.username}!`);
       setIsBotsLoading(true);
       fetchBots(data.user);
     } catch (err: any) {
-      showToast(err.message || 'Quick login failed. Please sign in with your password.');
-      openAuth('login');
+      showToast(err.message || 'Quick login failed. Please sign in with your credentials.');
     } finally {
       setIsQuickLoggingIn(false);
     }

@@ -22,7 +22,6 @@ import {
   ShieldAlert,
   Copy,
   Check,
-  Crown,
   ExternalLink,
 } from 'lucide-react';
 import { PublicPlatformStats, User, QuickLoginProfile } from '../types';
@@ -172,43 +171,6 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
   const activeBotsCount = publicStats !== null && publicStats !== undefined
     ? publicStats.activeBotsOnline
     : 154;
-
-  const handleAdminOneClickLogin = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const deviceId = getDeviceFingerprint();
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Device-Id': deviceId,
-          'X-Device-Fingerprint': deviceId,
-        },
-        body: JSON.stringify({ usernameOrEmail: 'Shifin', password: '0508552513' }),
-      });
-
-      const { ok, data } = await safeParseResponse(res);
-      if (!ok) {
-        throw new Error(data.error || 'Admin login failed');
-      }
-
-      localStorage.setItem('ninimo_token', data.token);
-      try {
-        localStorage.setItem('ninimo_user_profile', JSON.stringify(data.user));
-      } catch {}
-
-      if (onAuthSuccess) {
-        onAuthSuccess(data.user, data.token, data.quickToken);
-      } else {
-        window.location.reload();
-      }
-    } catch (err: any) {
-      setError(err.message || 'Admin login failed');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleGoogleSignIn = async () => {
     setError(null);
@@ -861,15 +823,6 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>Open Firebase Settings</span>
                       </a>
-                      <button
-                        type="button"
-                        onClick={handleAdminOneClickLogin}
-                        disabled={loading}
-                        className="px-2.5 py-1 text-[11px] bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
-                      >
-                        <Crown className="w-3.5 h-3.5 text-amber-300" />
-                        <span>1-Click Sign In as Admin (Shifin)</span>
-                      </button>
                     </div>
                   </motion.div>
                 )}
