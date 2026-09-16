@@ -115,16 +115,16 @@ export class BotInstance extends EventEmitter {
     this.addLog('info', 'System', `Connecting to ${this.config.host}:${this.config.port} as "${this.config.username}" (${this.config.auth})...`);
     this.emitUpdate();
 
-    // 30s connection timeout watchdog prevents bot getting indefinitely stuck in starting
+    // 60s connection timeout watchdog prevents bot getting indefinitely stuck in starting on slow container platforms like Railway
     if (this.connectionTimeoutWatchdog) {
       clearTimeout(this.connectionTimeoutWatchdog);
     }
     this.connectionTimeoutWatchdog = setTimeout(() => {
       if (this.status === 'starting') {
-        this.addLog('error', 'Network', 'Connection handshake timed out after 30s. Re-establishing fresh socket...');
+        this.addLog('error', 'Network', 'Connection handshake timed out after 60s. Re-establishing fresh socket...');
         this.handleConnectionFailure('Connection handshake timed out');
       }
-    }, 30000);
+    }, 60000);
 
     try {
       let host = (this.config.host || '').trim();
@@ -156,8 +156,8 @@ export class BotInstance extends EventEmitter {
         username: this.config.username,
         auth: this.config.auth || 'offline',
         hideErrors: false,
-        checkTimeoutInterval: 60000,
-        connectTimeout: 30000,
+        checkTimeoutInterval: 90000,
+        connectTimeout: 60000,
         viewDistance: 'tiny',
         defaultChatLength: 256,
         physicsEnabled: true,
