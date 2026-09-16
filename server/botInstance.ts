@@ -127,8 +127,18 @@ export class BotInstance extends EventEmitter {
     }, 30000);
 
     try {
-      const host = (this.config.host || '').trim();
-      const port = Number(this.config.port) || 25565;
+      let host = (this.config.host || '').trim();
+      let port = Number(this.config.port) || 25565;
+
+      // Automatically handle host:port if user pasted something like 'mc.hypixel.net:25565' or 'falixnodes.net:12345'
+      if (host.includes(':') && !host.startsWith('[')) {
+        const parts = host.split(':');
+        host = parts[0].trim();
+        const parsedP = parseInt(parts[1], 10);
+        if (!isNaN(parsedP) && parsedP >= 1 && parsedP <= 65535) {
+          port = parsedP;
+        }
+      }
 
       if (!host) {
         this.handleConnectionFailure('Invalid server address: Server Host / IP cannot be empty.');
@@ -145,15 +155,15 @@ export class BotInstance extends EventEmitter {
         port,
         username: this.config.username,
         auth: this.config.auth || 'offline',
-        hideErrors: true,
-        checkTimeoutInterval: 45000,
-        connectTimeout: 15000,
+        hideErrors: false,
+        checkTimeoutInterval: 60000,
+        connectTimeout: 30000,
         viewDistance: 'tiny',
         defaultChatLength: 256,
         physicsEnabled: true,
       };
 
-      if (this.config.version && this.config.version.trim() !== '') {
+      if (this.config.version && this.config.version.trim() !== '' && this.config.version.trim().toLowerCase() !== 'auto') {
         options.version = this.config.version.trim();
       }
 
@@ -173,12 +183,18 @@ export class BotInstance extends EventEmitter {
         this.viewerPort = nextViewerPort++;
       }
 
-      // Proactive OOM Protection: filter and drop non-critical heavy packet data
+      // Proactive socket lifecycle tracking & OOM Protection
       if ((this.bot as any)._client) {
         const client = (this.bot as any)._client;
+        client.on('connect', () => {
+          this.addLog('info', 'Network', `TCP socket established to ${host}:${port}. Handshaking protocol...`);
+        });
+        client.on('session', () => {
+          this.addLog('info', 'Network', `Handshake verified. Joining game world...`);
+        });
         client.on('error', (err: any) => {
           const msg = err?.message || String(err);
-          this.addLog('error', 'Network', `Socket network error: ${msg}`);
+          console.debug(`[Bot ${this.config.id}] Socket notice:`, msg);
         });
         // Discard unneeded heavy sound/particle/map/light/chunk data packets to conserve memory
         try {
@@ -507,17 +523,30 @@ export class BotInstance extends EventEmitter {
     });
 
     this.bot.on('kicked', (reason: any, loggedIn: boolean) => {
-      const reasonStr = typeof reason === 'string' ? reason : JSON.stringify(reason);
+      const reasonStr = typeof reason === 'string' ? reason : (reason?.text || JSON.stringify(reason));
       const cleanReason = stripMinecraftCodes(reasonStr);
       this.addLog('error', 'Kicked', `Disconnected by server: ${cleanReason}`);
+      if (cleanReason.toLowerCase().includes('outdated')) {
+        this.addLog('system', 'System', `Tip: Set the Minecraft version in Connection Settings to match the server (e.g. 1.20.4 or 1.16.5).`);
+      }
       this.handleDisconnect(`Kicked: ${cleanReason}`);
     });
 
     this.bot.on('error', (err: any) => {
       const msg = err?.message || String(err);
-      this.addLog('error', 'Error', `Connection error: ${msg}`);
-      this.lastError = msg;
-      this.handleDisconnect(msg);
+      let friendlyMsg = msg;
+      if (msg.includes('ENOTFOUND') || msg.includes('getaddrinfo')) {
+        friendlyMsg = `Server "${this.config.host}" address could not be resolved. Please check the server host IP.`;
+      } else if (msg.includes('ECONNREFUSED')) {
+        friendlyMsg = `Connection refused at ${this.config.host}:${this.config.port}. The Minecraft server is currently offline or unreachable.`;
+      } else if (msg.includes('ETIMEDOUT') || msg.includes('timed out')) {
+        friendlyMsg = `Connection timed out connecting to ${this.config.host}:${this.config.port}.`;
+      } else if (msg.toLowerCase().includes('handshake') || msg.toLowerCase().includes('protocol')) {
+        friendlyMsg = `Handshake failed with server protocol. Try explicitly selecting your Minecraft version (e.g., 1.20.4, 1.20.1, 1.16.5) in Connection Settings.`;
+      }
+      this.addLog('error', 'Error', `Connection error: ${friendlyMsg}`);
+      this.lastError = friendlyMsg;
+      this.handleDisconnect(friendlyMsg);
     });
 
     this.bot.on('end', (reason: any) => {
