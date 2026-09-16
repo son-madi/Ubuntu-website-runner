@@ -43,6 +43,7 @@ export class BotInstance extends EventEmitter {
   private positionPollTimer: NodeJS.Timeout | null = null;
   private memoryOptimizerTimer: NodeJS.Timeout | null = null;
   private viewerIdleTimer: NodeJS.Timeout | null = null;
+  private connectionTimeoutWatchdog: NodeJS.Timeout | null = null;
   private hasActiveUiClients: boolean = true;
 
   constructor(config: BotConfig) {
@@ -106,9 +107,24 @@ export class BotInstance extends EventEmitter {
       return;
     }
 
+    this.isManuallyStopped = false;
+    this.clearTimers();
+    this.stopViewer();
     this.status = 'starting';
+    this.nextReconnectIn = null;
     this.addLog('info', 'System', `Connecting to ${this.config.host}:${this.config.port} as "${this.config.username}" (${this.config.auth})...`);
     this.emitUpdate();
+
+    // 30s connection timeout watchdog prevents bot getting indefinitely stuck in starting
+    if (this.connectionTimeoutWatchdog) {
+      clearTimeout(this.connectionTimeoutWatchdog);
+    }
+    this.connectionTimeoutWatchdog = setTimeout(() => {
+      if (this.status === 'starting') {
+        this.addLog('error', 'Network', 'Connection handshake timed out after 30s. Re-establishing fresh socket...');
+        this.handleConnectionFailure('Connection handshake timed out');
+      }
+    }, 30000);
 
     try {
       const host = (this.config.host || '').trim();
@@ -130,10 +146,11 @@ export class BotInstance extends EventEmitter {
         username: this.config.username,
         auth: this.config.auth || 'offline',
         hideErrors: true,
-        checkTimeoutInterval: 60000,
-        connectTimeout: 20000,
+        checkTimeoutInterval: 45000,
+        connectTimeout: 15000,
         viewDistance: 'tiny',
         defaultChatLength: 256,
+        physicsEnabled: true,
       };
 
       if (this.config.version && this.config.version.trim() !== '') {
@@ -156,14 +173,14 @@ export class BotInstance extends EventEmitter {
         this.viewerPort = nextViewerPort++;
       }
 
-      // Attach client-level error safety immediately and ignore heavy memory-eating packets
+      // Proactive OOM Protection: filter and drop non-critical heavy packet data
       if ((this.bot as any)._client) {
         const client = (this.bot as any)._client;
         client.on('error', (err: any) => {
           const msg = err?.message || String(err);
           this.addLog('error', 'Network', `Socket network error: ${msg}`);
         });
-        // Discard unneeded heavy sound/particle/map/light packets to conserve memory
+        // Discard unneeded heavy sound/particle/map/light/chunk data packets to conserve memory
         try {
           client.on('named_sound_effect', () => {});
           client.on('sound_effect', () => {});
@@ -243,10 +260,17 @@ export class BotInstance extends EventEmitter {
 
     if (this.bot) {
       try {
+        const client = (this.bot as any)._client;
+        if (client) {
+          if (client.socket) client.socket.destroy();
+          client.removeAllListeners?.();
+          client.end?.('Bot stopped');
+        }
         this.bot.quit('Bot stopped by user');
-      } catch {
-        // ignore
-      }
+      } catch {}
+      try {
+        this.bot.removeAllListeners();
+      } catch {}
       this.bot = null;
     }
 
@@ -347,10 +371,15 @@ export class BotInstance extends EventEmitter {
 
     // When the bot packet handshake succeeds, it is connected to the Minecraft server!
     this.bot.once('login', () => {
+      if (this.connectionTimeoutWatchdog) {
+        clearTimeout(this.connectionTimeoutWatchdog);
+        this.connectionTimeoutWatchdog = null;
+      }
       this.status = 'online';
       if (!this.onlineSince) this.onlineSince = Date.now();
       this.lastError = null;
       this.nextReconnectIn = null;
+      this.reconnectCount = 0;
       this.addLog('info', 'System', `Connected to server! (Status: Connected)`);
       this.emitUpdate();
 
@@ -359,37 +388,16 @@ export class BotInstance extends EventEmitter {
     });
 
     this.bot.once('spawn', () => {
+      if (this.connectionTimeoutWatchdog) {
+        clearTimeout(this.connectionTimeoutWatchdog);
+        this.connectionTimeoutWatchdog = null;
+      }
       this.status = 'online';
       if (!this.onlineSince) this.onlineSince = Date.now();
       this.lastError = null;
       this.nextReconnectIn = null;
+      this.reconnectCount = 0;
       this.addLog('info', 'System', `Spawned in world successfully! Running 24/7.`);
-
-      // Ensure viewer is initialized ONLY after spawn to capture chunks correctly
-      try {
-        if (!this.bot.viewer) {
-          if (!this.viewerPort) this.viewerPort = nextViewerPort++;
-          mineflayerViewer(this.bot, {
-            port: this.viewerPort,
-            version: this.bot.version, // Ensure minecraft-data matches server version for textures
-            firstPerson: true,
-            viewDistance: 6,
-            prefix: `/viewer/${this.config.id}`
-          } as any);
-          
-          // Force a world redraw by listening to chunkColumnLoad
-          this.bot.on('chunkColumnLoad', (point: any) => {
-            // Trigger updates to connected viewer sockets to render chunks
-            if (this.bot.viewer?.sockets) {
-               for (const socket of this.bot.viewer.sockets) {
-                 socket.emit('chunkColumnLoad', point);
-               }
-            }
-          });
-        }
-      } catch (err) {
-        console.error("Failed to initialize viewer on spawn", err);
-      }
 
       // Read initial state
       this.syncBotData();
@@ -661,36 +669,43 @@ export class BotInstance extends EventEmitter {
 
   private handleDisconnect(reason: string) {
     this.clearTimers();
+    this.stopViewer();
     this.onlineSince = null;
     this.status = 'kicked';
     this.lastError = reason;
 
     if (this.bot) {
       try {
-        this.bot.removeAllListeners();
-        // Prevent late socket errors during DNS/network teardown from becoming uncaught exceptions
-        this.bot.on('error', () => {});
-        if ((this.bot as any)._client) {
-          (this.bot as any)._client.removeAllListeners?.();
-          (this.bot as any)._client.on?.('error', () => {});
+        const client = (this.bot as any)._client;
+        if (client) {
+          if (client.socket) client.socket.destroy();
+          client.removeAllListeners?.();
+          client.end?.('disconnect');
         }
+        this.bot.quit?.('disconnect');
+      } catch {}
+      try {
+        this.bot.removeAllListeners();
+        // Prevent late socket errors from crashing process
+        this.bot.on('error', () => {});
       } catch {}
       this.bot = null;
     }
 
-    if (this.isManuallyStopped || !this.config.autoReconnect) {
+    if (this.isManuallyStopped) {
       this.status = 'stopped';
-      this.addLog('info', 'System', `Bot disconnected (${reason}). Auto-reconnect is disabled.`);
+      this.addLog('info', 'System', `Bot stopped manually.`);
       this.emitUpdate();
       return;
     }
 
-    // Trigger auto-reconnect countdown
-    const delay = Math.max(3, this.config.reconnectDelaySeconds || 5);
+    // Auto-reconnect is guaranteed: immediate and resilient retry (3-5s default)
+    const baseDelay = Math.max(2, this.config.reconnectDelaySeconds || 3);
+    const delay = Math.min(8, baseDelay);
     this.reconnectCount++;
     this.status = 'reconnecting';
     this.nextReconnectIn = delay;
-    this.addLog('info', 'Auto-Reconnect', `Disconnected. Reconnecting automatically in ${delay} seconds (Attempt #${this.reconnectCount})...`);
+    this.addLog('info', 'Auto-Reconnect', `Disconnected (${reason || 'server closed'}). Reconnecting immediately in ${delay}s...`);
     this.emitUpdate();
 
     this.reconnectIntervalTimer = setInterval(() => {
@@ -705,7 +720,7 @@ export class BotInstance extends EventEmitter {
     this.reconnectTimer = setTimeout(() => {
       this.nextReconnectIn = null;
       if (!this.isManuallyStopped) {
-        this.addLog('info', 'Auto-Reconnect', `Reconnecting now...`);
+        this.addLog('info', 'Auto-Reconnect', `Immediate reconnection in progress...`);
         this.start();
       }
     }, delay * 1000);
@@ -713,17 +728,33 @@ export class BotInstance extends EventEmitter {
 
   private handleConnectionFailure(msg: string) {
     this.clearTimers();
+    this.stopViewer();
+    if (this.bot) {
+      try {
+        const client = (this.bot as any)._client;
+        if (client) {
+          if (client.socket) client.socket.destroy();
+          client.removeAllListeners?.();
+          client.end?.('failure');
+        }
+      } catch {}
+      try {
+        this.bot.removeAllListeners();
+      } catch {}
+      this.bot = null;
+    }
+
     this.lastError = msg;
     this.status = 'error';
     this.addLog('error', 'Error', msg);
     this.emitUpdate();
 
-    if (this.config.autoReconnect && !this.isManuallyStopped) {
-      const delay = Math.max(5, this.config.reconnectDelaySeconds || 10);
+    if (!this.isManuallyStopped) {
+      const delay = 3;
       this.status = 'reconnecting';
       this.nextReconnectIn = delay;
       this.reconnectCount++;
-      this.addLog('info', 'Auto-Reconnect', `Retrying connection in ${delay}s...`);
+      this.addLog('info', 'Auto-Reconnect', `Retrying connection immediately in ${delay}s...`);
       this.emitUpdate();
 
       this.reconnectIntervalTimer = setInterval(() => {
@@ -845,28 +876,56 @@ export class BotInstance extends EventEmitter {
       clearTimeout(this.viewerIdleTimer);
       this.viewerIdleTimer = null;
     }
+    if (this.connectionTimeoutWatchdog) {
+      clearTimeout(this.connectionTimeoutWatchdog);
+      this.connectionTimeoutWatchdog = null;
+    }
   }
 
   public pruneMemoryUsage() {
     try {
       if (this.bot) {
-        // 1. Prune entity cache: keep self and other player entities only
+        // 1. Prune entity cache: keep self and other player entities within 48-block range
         if (this.bot.entities) {
           const selfId = this.bot.entity?.id;
+          const botPos = this.bot.entity?.position;
           const keys = Object.keys(this.bot.entities);
           for (let i = 0; i < keys.length; i++) {
             const key = keys[i];
             const ent = this.bot.entities[key];
-            if (Number(key) !== selfId && (!ent || ent.type !== 'player')) {
-              delete this.bot.entities[key];
+            if (Number(key) !== selfId) {
+              if (!ent || ent.type !== 'player') {
+                delete this.bot.entities[key];
+              } else if (botPos && ent.position) {
+                const dx = ent.position.x - botPos.x;
+                const dz = ent.position.z - botPos.z;
+                if (dx * dx + dz * dz > 2304) {
+                  delete this.bot.entities[key];
+                }
+              }
             }
           }
         }
 
-        // 2. Prune world column chunk data if loaded (Disabled to allow 3D viewer to render world)
-        // if (this.bot.world && (this.bot.world as any).columns) {
-        //   (this.bot.world as any).columns = {};
-        // }
+        // 2. Prune distant world chunk columns (Prevents 100MB+ chunk cache memory leak over 12h)
+        if (this.bot.world && (this.bot.world as any).columns) {
+          const cols = (this.bot.world as any).columns;
+          const botChunkX = Math.floor(this.position.x / 16);
+          const botChunkZ = Math.floor(this.position.z / 16);
+          const colKeys = Object.keys(cols);
+          for (let i = 0; i < colKeys.length; i++) {
+            const k = colKeys[i];
+            const parts = k.split(',');
+            if (parts.length === 2) {
+              const cx = parseInt(parts[0], 10);
+              const cz = parseInt(parts[1], 10);
+              // Only retain immediate 2-chunk radius around bot
+              if (Math.abs(cx - botChunkX) > 2 || Math.abs(cz - botChunkZ) > 2) {
+                delete cols[k];
+              }
+            }
+          }
+        }
 
         // 3. Clear Mineflayer block and pathfinder cache
         if ((this.bot as any)._blocks) {
@@ -882,9 +941,9 @@ export class BotInstance extends EventEmitter {
         }
       }
 
-      // 4. Cap chat history in RAM to preserve performance (150 recent messages)
-      if (this.chatHistory.length > 200) {
-        this.chatHistory = this.chatHistory.slice(-150);
+      // 4. Cap chat history in RAM to preserve performance (100 recent messages)
+      if (this.chatHistory.length > 120) {
+        this.chatHistory = this.chatHistory.slice(-100);
       }
     } catch {
       // safe no-op

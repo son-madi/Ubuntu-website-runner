@@ -4,14 +4,9 @@ import { EventEmitter } from 'events';
 import { BotConfig, BotState, GlobalStats, PublicPlatformStats } from '../src/types.js';
 import { BotInstance } from './botInstance.js';
 import { authManager } from './auth.js';
+import { DATA_DIR } from './dataDir.js';
 
 const ROOT_DIR = process.cwd();
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT_DIR, 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch {}
-}
 
 const CONFIG_FILE = path.join(DATA_DIR, 'bot-configs.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'system-settings.json');
@@ -156,20 +151,25 @@ export class BotManager extends EventEmitter {
       this.registerBot(conf);
     }
 
-    // Auto-resume bots that were active before server or container restart
+    // Fast Auto-resume bots that were active before server restart / OOM recovery
     setTimeout(() => {
+      let staggerDelayMs = 0;
       for (const bot of this.bots.values()) {
         if (bot.config.shouldRun && bot.status === 'stopped') {
-          console.log(`[BOOT AUTO-RESUME] Resuming 24/7 bot "${bot.config.name}" for user ${bot.config.userId}...`);
-          bot.start();
+          const currentBot = bot;
+          setTimeout(() => {
+            console.log(`[FAST BOOT AUTO-RESUME] Resuming 24/7 bot "${currentBot.config.name}" for user ${currentBot.config.userId}...`);
+            currentBot.start();
+          }, staggerDelayMs);
+          staggerDelayMs += 600; // Fast 600ms stagger for immediate recovery
         }
       }
-    }, 2000);
+    }, 300);
 
-    // Global Proactive Railway Memory Sweeper (Runs every 45s)
+    // Global Proactive Railway Memory Sweeper (Runs every 20s to prevent OOM)
     setInterval(() => {
       this.pruneAllMemory();
-    }, 45000);
+    }, 20000);
   }
 
   public getActiveUiClientCount(): number {

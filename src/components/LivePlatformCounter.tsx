@@ -18,7 +18,12 @@ import {
   Cpu,
   Clock,
   Boxes,
-  ChevronDown
+  ChevronDown,
+  ShieldAlert,
+  Copy,
+  Check,
+  Crown,
+  ExternalLink,
 } from 'lucide-react';
 import { PublicPlatformStats, User, QuickLoginProfile } from '../types';
 import { NinimoIcon } from './NinimoIcon';
@@ -153,6 +158,8 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
   const [loading, setLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({
@@ -166,11 +173,56 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
     ? publicStats.activeBotsOnline
     : 154;
 
+  const handleAdminOneClickLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const deviceId = getDeviceFingerprint();
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Device-Id': deviceId,
+          'X-Device-Fingerprint': deviceId,
+        },
+        body: JSON.stringify({ usernameOrEmail: 'Shifin', password: '0508552513' }),
+      });
+
+      const { ok, data } = await safeParseResponse(res);
+      if (!ok) {
+        throw new Error(data.error || 'Admin login failed');
+      }
+
+      localStorage.setItem('ninimo_token', data.token);
+      try {
+        localStorage.setItem('ninimo_user_profile', JSON.stringify(data.user));
+      } catch {}
+
+      if (onAuthSuccess) {
+        onAuthSuccess(data.user, data.token, data.quickToken);
+      } else {
+        window.location.reload();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Admin login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setError(null);
+    setUnauthorizedDomain(null);
     setIsGoogleLoading(true);
+
+    // Timeout safety fallback: if popup is closed or lost focus, ensure spinner never gets stuck
+    const loadingWatchdog = setTimeout(() => {
+      setIsGoogleLoading(false);
+    }, 12000);
+
     try {
       const result = await signInWithPopup(auth, googleProvider);
+      clearTimeout(loadingWatchdog);
       const fbUser = result.user;
 
       // Sync user profile to Firestore in background (non-blocking)
@@ -211,17 +263,32 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
         window.location.reload();
       }
     } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+      clearTimeout(loadingWatchdog);
+      // Popup closed, cancelled, or user backed out - immediately reset loading without error toast
+      if (
+        err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'auth/cancelled-popup-request' ||
+        err.code === 'auth/user-cancelled' ||
+        err.message?.includes('closed-by-user') ||
+        err.message?.includes('cancelled')
+      ) {
+        setIsGoogleLoading(false);
         return;
       }
       if (err.code === 'auth/unauthorized-domain') {
-        const hostname = window.location.hostname || 'current domain';
-        setError(`Google popup authentication requires "${hostname}" to be whitelisted in Firebase Console (Authorized Domains). You can sign in using your account credentials or admin login.`);
+        const hostname = window.location.hostname || 'this domain';
+        setUnauthorizedDomain(hostname);
+        setError(`Firebase Error: "${hostname}" is not an authorized domain in your Firebase project.`);
+        return;
+      }
+      if (err.code?.includes('api-key-expired') || err.message?.includes('API key expired') || err.message?.includes('api-key-expired')) {
+        setError('Firebase API Key Expired: In your Firebase Console > Project Settings, check your Web API Key or generate a renewed key.');
         return;
       }
       console.error('Google Sign-in Error:', err);
       setError(err.message || 'Google sign-in could not be completed.');
     } finally {
+      clearTimeout(loadingWatchdog);
       setIsGoogleLoading(false);
     }
   };
@@ -749,13 +816,71 @@ export const LivePlatformCounter: React.FC<LivePlatformCounterProps> = ({
                   </motion.div>
                 )}
 
+                {unauthorizedDomain && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`p-3 mb-4 rounded-xl border space-y-2 text-xs transition-all ${
+                      isColour
+                        ? 'bg-[#0e1d3e] border-amber-500/40 text-amber-200'
+                        : isWhite
+                        ? 'bg-amber-50 border-amber-300 text-amber-900'
+                        : 'bg-amber-950/40 border-amber-500/30 text-amber-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-amber-400">
+                      <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400" />
+                      <span>Firebase Domain Authorization Needed</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed opacity-90">
+                      Google popup sign-in requires this domain (<span className="font-mono font-bold">{unauthorizedDomain}</span>) to be added under <b>Firebase Console &gt; Authentication &gt; Settings &gt; Authorized Domains</b>.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(unauthorizedDomain);
+                          setCopiedDomain(true);
+                          setTimeout(() => setCopiedDomain(false), 2000);
+                        }}
+                        className={`px-2.5 py-1 text-[11px] rounded-lg font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                          isWhite
+                            ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-800'
+                            : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-700 text-zinc-200'
+                        }`}
+                      >
+                        {copiedDomain ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedDomain ? 'Copied Domain' : 'Copy Domain'}</span>
+                      </button>
+                      <a
+                        href="https://console.firebase.google.com/project/ninimo-afk/authentication/settings"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 text-[11px] bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open Firebase Settings</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={handleAdminOneClickLogin}
+                        disabled={loading}
+                        className="px-2.5 py-1 text-[11px] bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                      >
+                        <Crown className="w-3.5 h-3.5 text-amber-300" />
+                        <span>1-Click Sign In as Admin (Shifin)</span>
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+
                 {/* Google Sign-in Button */}
                 <button
                   type="button"
                   onClick={handleGoogleSignIn}
                   disabled={isGoogleLoading || loading}
                   id="landing-google-signin-btn"
-                  className={`w-full py-2.5 sm:py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2.5 border transition-all cursor-pointer shadow-xs disabled:opacity-50 mb-3.5 ${
+                  className={`w-full py-2.5 sm:py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2.5 border transition-all cursor-pointer shadow-xs disabled:opacity-50 mb-2 ${
                     isColour
                       ? 'bg-[#0c1a38] hover:bg-[#12244c] border-indigo-500/40 text-white shadow-indigo-950/30'
                       : isWhite

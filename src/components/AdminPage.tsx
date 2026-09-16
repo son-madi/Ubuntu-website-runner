@@ -31,6 +31,8 @@ import {
   UserPlus,
   MessageSquare,
   Image as ImageIcon,
+  ExternalLink,
+  ShieldCheck,
 } from 'lucide-react';
 import { AdminAccountInfo, User, ChatConfig } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -1415,6 +1417,43 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   </motion.div>
                 )}
               </form>
+            </div>
+
+            {/* Firebase & Google Sign-In Project Branding Card */}
+            <div className={`md:col-span-2 border rounded-3xl p-6 shadow-xl space-y-4 ${getCardBg()}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      Firebase & Google Sign-In Branding
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+                        Ninimo AFK Active
+                      </span>
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Connected to dedicated project <code className="text-amber-400 font-mono">ninimo-afk</code>. Google sign-in popups display Ninimo AFK.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="p-3 rounded-2xl bg-zinc-900/50 border border-zinc-800">
+                  <span className="text-[11px] text-zinc-500 block font-medium">Active Project ID</span>
+                  <span className="font-mono font-bold text-zinc-200">ninimo-afk</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-zinc-900/50 border border-zinc-800">
+                  <span className="text-[11px] text-zinc-500 block font-medium">Auth Domain</span>
+                  <span className="font-mono font-bold text-zinc-200 truncate block">ninimo-afk.firebaseapp.com</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-zinc-900/50 border border-zinc-800">
+                  <span className="text-[11px] text-zinc-500 block font-medium">Google Popup Display Name</span>
+                  <span className="font-bold text-amber-300">Ninimo AFK</span>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}

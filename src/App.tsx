@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BotState, GlobalStats, BotConfig, User, PublicPlatformStats, BotDefaults, QuickLoginProfile } from './types';
 import { Navbar } from './components/Navbar';
@@ -373,14 +373,26 @@ export default function App() {
     return fetch(url, { ...options, headers });
   }, []);
 
-  // Backup bot configs in browser storage per user so data is never lost across container restarts
+  const saveDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Backup bot configs in browser storage per user with debouncing to prevent UI micro-stutters
   const saveBotsToLocalStorage = useCallback((userId: string, currentBots: BotState[]) => {
-    try {
-      if (!userId || currentBots.length === 0) return;
-      const configsToSave = currentBots.map((b) => b.config);
-      localStorage.setItem(`ninimo_bots_${userId}`, JSON.stringify(configsToSave));
-      localStorage.setItem(`ninimo_bots_state_${userId}`, JSON.stringify(currentBots));
-    } catch {}
+    if (!userId || currentBots.length === 0) return;
+    if (saveDebounceTimerRef.current) {
+      clearTimeout(saveDebounceTimerRef.current);
+    }
+    saveDebounceTimerRef.current = setTimeout(() => {
+      try {
+        const configsToSave = currentBots.map((b) => b.config);
+        localStorage.setItem(`ninimo_bots_${userId}`, JSON.stringify(configsToSave));
+        // Save slim state to avoid massive synchronous localStorage blocks
+        const slimBots = currentBots.map((b) => ({
+          ...b,
+          chatHistory: b.chatHistory.slice(-25),
+        }));
+        localStorage.setItem(`ninimo_bots_state_${userId}`, JSON.stringify(slimBots));
+      } catch {}
+    }, 3000);
   }, []);
 
   const getBotsFromLocalStorage = useCallback((userId: string): BotConfig[] => {
@@ -689,7 +701,7 @@ export default function App() {
               prev.map((b) => {
                 if (b.id === botId) {
                   const newHistory = [...b.chatHistory, message];
-                  if (newHistory.length > 500) newHistory.shift();
+                  if (newHistory.length > 150) newHistory.shift();
                   return { ...b, chatHistory: newHistory };
                 }
                 return b;

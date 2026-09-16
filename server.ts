@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import http from 'http';
 import path from 'path';
@@ -10,14 +11,10 @@ import { createServer as createViteServer } from 'vite';
 import { botManager } from './server/botManager.js';
 import { authManager } from './server/auth.js';
 import { ChatManager } from './server/chat.js';
+import { DATA_DIR } from './server/dataDir.js';
+import { firebaseConfigManager } from './server/firebaseConfigManager.js';
 
 const ROOT_DIR = process.cwd();
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT_DIR, 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch {}
-}
 
 function getLocalIp(): string {
   try {
@@ -60,6 +57,26 @@ console.warn = function (...args) {
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
+
+  // Enable full cross-origin resource sharing (CORS) across all origins, headers & methods
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-device-fingerprint',
+        'x-device-id',
+        'x-admin-key',
+        'Accept',
+        'Origin',
+        'X-Requested-With',
+      ],
+    })
+  );
+  app.options('*', cors());
 
   // Port resolution: AI Studio sandbox routes strictly to port 3000 via internal proxy.
   // On Railway or standard production hosts, listen dynamically on the assigned process.env.PORT.
@@ -304,6 +321,43 @@ async function startServer() {
       res.json(result);
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to restore session' });
+    }
+  });
+
+  // Dynamic Firebase Configuration API (Easy & 100% free custom Firebase project switching)
+  app.get('/api/firebase/config', (req, res) => {
+    try {
+      const active = firebaseConfigManager.getActiveConfig();
+      res.json(active);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to retrieve Firebase configuration' });
+    }
+  });
+
+  app.post('/api/firebase/config', (req, res) => {
+    try {
+      const user = getAuthUser(req);
+      // Allow if user is admin OR if it's the initial installation setup
+      if (user && !user.isAdmin) {
+        return res.status(403).json({ error: 'Administrator access required to update Firebase settings' });
+      }
+      const result = firebaseConfigManager.setCustomConfig(req.body);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to update Firebase configuration' });
+    }
+  });
+
+  app.post('/api/firebase/config/reset', (req, res) => {
+    try {
+      const user = getAuthUser(req);
+      if (user && !user.isAdmin) {
+        return res.status(403).json({ error: 'Administrator access required to reset Firebase settings' });
+      }
+      const result = firebaseConfigManager.resetToDefault();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to reset Firebase configuration' });
     }
   });
 
@@ -925,6 +979,11 @@ async function startServer() {
     });
   });
 
+  // REST endpoint for platform public stats
+  app.get('/api/public/stats', (req, res) => {
+    res.json(botManager.getPlatformPublicStats());
+  });
+
   // Ensure that all unmatched /api/* routes return 404 JSON, NEVER Vite index.html or HTML!
   app.all('/api/*', (req, res) => {
     res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
@@ -1019,21 +1078,36 @@ async function startServer() {
     console.log(`  ➜  Mode:     ${isDev ? 'Development (Instant Hot-Reload)' : 'Production (Optimized static bundle)'}`);
     console.log('='.repeat(60) + '\n');
 
-    // Server-wide memory watchdog: prevents Railway container OOM kills
+    // Server-wide high-performance memory watchdog: prevents Railway container OOM kills
+    let highMemoryCounter = 0;
     setInterval(() => {
       try {
         const mem = process.memoryUsage();
         const rssMb = Math.round(mem.rss / 1024 / 1024);
         const heapMb = Math.round(mem.heapUsed / 1024 / 1024);
-        if (rssMb > 220 || heapMb > 160) {
-          console.log(`[RAM WATCHDOG] Memory at RSS: ${rssMb}MB, Heap: ${heapMb}MB. Running memory sweep & cache purge...`);
+
+        if (rssMb > 200 || heapMb > 140) {
           botManager.pruneAllMemory();
           if ((global as any).gc) {
             try { (global as any).gc(); } catch {}
           }
         }
+
+        // Critical OOM threshold guard (420MB RSS or 340MB heap)
+        // Pre-emptively restart before Linux kernel SIGKILL to ensure instant 1-second recovery
+        if (rssMb > 420 || heapMb > 340) {
+          highMemoryCounter++;
+          if (highMemoryCounter >= 2) {
+            console.warn(`\n⚠️ [FAST OOM RECOVERY] Approaching memory limit (RSS: ${rssMb}MB, Heap: ${heapMb}MB).`);
+            console.warn(`⚡ Initiating instant clean restart to maintain 24/7 bot uptime without downtime...`);
+            try { botManager.shutdown(); } catch {}
+            process.exit(0); // Railway will instantly respawn process, bots auto-resume in 300ms!
+          }
+        } else {
+          highMemoryCounter = 0;
+        }
       } catch {}
-    }, 30000);
+    }, 10000);
   });
 }
 

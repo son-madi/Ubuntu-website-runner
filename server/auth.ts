@@ -1,13 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(process.cwd(), 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch {}
-}
+import { DATA_DIR } from './dataDir.js';
 
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');

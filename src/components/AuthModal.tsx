@@ -16,6 +16,7 @@ import {
   Copy,
   Check,
   Crown,
+  ExternalLink,
 } from 'lucide-react';
 import { getDeviceFingerprint } from '../lib/fingerprint';
 import { User, QuickLoginProfile } from '../types';
@@ -132,11 +133,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setError(null);
     setUnauthorizedDomain(null);
     setIsGoogleLoading(true);
+
+    // Timeout safety fallback: if user closes the popup or switches tab and browser misses the event,
+    // ensure loading spinner never gets stuck
+    const loadingWatchdog = setTimeout(() => {
+      setIsGoogleLoading(false);
+    }, 12000);
+
     try {
       const result = await signInWithPopup(auth, googleProvider);
+      clearTimeout(loadingWatchdog);
       const fbUser = result.user;
 
-      // Sync user profile to Firestore in the background (non-blocking)
+      // Sync user profile to Firestore non-blockingly
       syncUserToFirestore(fbUser).catch((e) =>
         console.debug('Background Firestore sync notice:', e)
       );
@@ -170,7 +179,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       onSuccess(data.user, data.token, data.quickToken);
     } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+      clearTimeout(loadingWatchdog);
+      // Popup closed, cancelled, or user backed out - immediately reset loading without error toast
+      if (
+        err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'auth/cancelled-popup-request' ||
+        err.code === 'auth/user-cancelled' ||
+        err.message?.includes('closed-by-user') ||
+        err.message?.includes('cancelled')
+      ) {
+        setIsGoogleLoading(false);
         return;
       }
       if (err.code === 'auth/unauthorized-domain') {
@@ -179,9 +197,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setError(`Firebase Error: "${hostname}" is not an authorized domain in your Firebase project.`);
         return;
       }
+      if (err.code?.includes('api-key-expired') || err.message?.includes('API key expired') || err.message?.includes('api-key-expired')) {
+        setError('Firebase API Key Expired: In your Firebase Console > Project Settings, check your Web API Key or generate a renewed key.');
+        return;
+      }
       console.error('Google Sign-in Error:', err);
       setError(err.message || 'Google sign-in could not be completed.');
     } finally {
+      clearTimeout(loadingWatchdog);
       setIsGoogleLoading(false);
     }
   };
@@ -422,6 +445,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   {copiedDomain ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copiedDomain ? 'Copied to Clipboard' : 'Copy Domain'}</span>
                 </button>
+                <a
+                  href="https://console.firebase.google.com/project/ninimo-afk/authentication/settings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 text-[11px] bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open Firebase Settings</span>
+                </a>
                 <button
                   type="button"
                   onClick={handleAdminOneClickLogin}

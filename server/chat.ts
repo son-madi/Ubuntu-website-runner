@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { DATA_DIR } from './dataDir.js';
 
 export interface ReplyPreview {
   id: string;
@@ -26,7 +27,6 @@ export interface ChatConfig {
 }
 
 const ROOT_DIR = process.cwd();
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT_DIR, 'data');
 const CHAT_FILE = path.join(DATA_DIR, 'general_chat.json');
 const CHAT_CONFIG_FILE = path.join(DATA_DIR, 'chat_config.json');
 const LEGACY_CHAT_FILE = path.join(ROOT_DIR, 'general_chat.json');

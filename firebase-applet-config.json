@@ -1,12 +1,12 @@
 {
-  "projectId": "laughing-raceway-6pqwl",
-  "appId": "1:582765948511:web:7b45655f3296441a13b5ea",
-  "apiKey": "AIzaSyDcznib_9sP8ngaH3mMjBm_MssKZkgCLj0",
-  "authDomain": "laughing-raceway-6pqwl.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-ninimolastremix-b58fec49-c7a1-4b08-9836-bc21ac9a7cbe",
-  "storageBucket": "laughing-raceway-6pqwl.firebasestorage.app",
-  "messagingSenderId": "582765948511",
-  "measurementId": "",
-  "oAuthClientId": "582765948511-lvp9g4h8050og4elkfrgldpccj2c4b48.apps.googleusercontent.com",
+  "projectId": "ninimo-afk",
+  "appId": "1:600029855994:web:b7918fd833379fc1e98943",
+  "apiKey": "AIzaSyA5Y9N_b8QL-SEpjUc3e6zbRBRZOPny69k",
+  "authDomain": "ninimo-afk.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "ninimo-afk.firebasestorage.app",
+  "messagingSenderId": "600029855994",
+  "measurementId": "G-0866Q18BW9",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

@@ -1,11 +1,13 @@
 /// <reference types="vite/client" />
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, deleteApp } from 'firebase/app';
+import { getAnalytics, isSupported as isAnalyticsSupported, Analytics } from 'firebase/analytics';
 import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInAnonymously,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   updateProfile,
@@ -22,27 +24,159 @@ import firebaseConfigJson from '../../firebase-applet-config.json';
 
 const env = (import.meta as any).env || {};
 
-export const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || firebaseConfigJson.apiKey,
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigJson.authDomain,
-  projectId: env.VITE_FIREBASE_PROJECT_ID || firebaseConfigJson.projectId,
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigJson.storageBucket,
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigJson.messagingSenderId,
-  appId: env.VITE_FIREBASE_APP_ID || firebaseConfigJson.appId,
-};
+export interface ActiveFirebaseConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  measurementId?: string;
+  firestoreDatabaseId?: string;
+  projectName?: string;
+  isCustom?: boolean;
+}
+
+// 1. Resolve initial configuration (checking localStorage first, then env, then default json)
+function resolveInitialConfig(): ActiveFirebaseConfig {
+  try {
+    const rawLocal = localStorage.getItem('ninimo_custom_firebase_config');
+    if (rawLocal) {
+      const parsed = JSON.parse(rawLocal);
+      // If cached API key does not match active firebaseConfigJson or is old, clear it
+      if (parsed && parsed.apiKey && parsed.projectId && parsed.apiKey === firebaseConfigJson.apiKey) {
+        return {
+          apiKey: parsed.apiKey,
+          authDomain: parsed.authDomain || `${parsed.projectId}.firebaseapp.com`,
+          projectId: parsed.projectId,
+          storageBucket: parsed.storageBucket || `${parsed.projectId}.firebasestorage.app`,
+          messagingSenderId: parsed.messagingSenderId || '',
+          appId: parsed.appId || '',
+          projectName: parsed.projectName || parsed.projectId,
+          firestoreDatabaseId: parsed.firestoreDatabaseId || '',
+          isCustom: true,
+        };
+      } else {
+        localStorage.removeItem('ninimo_custom_firebase_config');
+      }
+    }
+  } catch {}
+
+  const envApiKey = env.VITE_FIREBASE_API_KEY;
+  const envAuthDomain = env.VITE_FIREBASE_AUTH_DOMAIN;
+  const envProjectId = env.VITE_FIREBASE_PROJECT_ID;
+
+  if (envApiKey && envAuthDomain && envProjectId) {
+    return {
+      apiKey: envApiKey,
+      authDomain: envAuthDomain,
+      projectId: envProjectId,
+      storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || `${envProjectId}.firebasestorage.app`,
+      messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+      appId: env.VITE_FIREBASE_APP_ID || '',
+      projectName: envProjectId,
+      isCustom: true,
+    };
+  }
+
+  return {
+    apiKey: firebaseConfigJson.apiKey,
+    authDomain: firebaseConfigJson.authDomain,
+    projectId: firebaseConfigJson.projectId,
+    storageBucket: firebaseConfigJson.storageBucket,
+    messagingSenderId: firebaseConfigJson.messagingSenderId,
+    appId: firebaseConfigJson.appId,
+    measurementId: (firebaseConfigJson as any).measurementId || 'G-0866Q18BW9',
+    firestoreDatabaseId: firebaseConfigJson.firestoreDatabaseId,
+    projectName: 'Ninimo AFK',
+    isCustom: true,
+  };
+}
+
+export let activeFirebaseConfig: ActiveFirebaseConfig = resolveInitialConfig();
+
+// Backward compatibility export
+export const firebaseConfig = activeFirebaseConfig;
 
 // Initialize Firebase App singleton
-export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export let app = getApps().length === 0 ? initializeApp(activeFirebaseConfig) : getApp();
+
+// Firebase Analytics (browser environment safe)
+export let analytics: Analytics | null = null;
+if (typeof window !== 'undefined') {
+  try {
+    isAnalyticsSupported()
+      .then((supported) => {
+        if (supported && app) {
+          analytics = getAnalytics(app);
+        }
+      })
+      .catch(() => {
+        // Analytics error ignored gracefully
+      });
+  } catch {}
+}
 
 // Firebase Auth & Firestore
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
+export let auth = getAuth(app);
+export let googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-// Initialize Firestore with specific database ID if defined in configuration
-export const db = firebaseConfigJson.firestoreDatabaseId && firebaseConfigJson.firestoreDatabaseId !== '(default)'
-  ? getFirestore(app, firebaseConfigJson.firestoreDatabaseId)
-  : getFirestore(app);
+// Initialize Firestore
+export let db =
+  activeFirebaseConfig.firestoreDatabaseId && activeFirebaseConfig.firestoreDatabaseId !== '(default)'
+    ? getFirestore(app, activeFirebaseConfig.firestoreDatabaseId)
+    : getFirestore(app);
+
+/**
+ * Save and apply custom Firebase credentials (switches popup to your custom project name)
+ */
+export async function applyCustomFirebaseConfig(config: {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  appId?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  projectName?: string;
+}): Promise<void> {
+  const cleanConfig: ActiveFirebaseConfig = {
+    apiKey: config.apiKey.trim(),
+    authDomain: config.authDomain.trim(),
+    projectId: config.projectId.trim(),
+    appId: config.appId ? config.appId.trim() : undefined,
+    storageBucket: config.storageBucket ? config.storageBucket.trim() : `${config.projectId.trim()}.firebasestorage.app`,
+    messagingSenderId: config.messagingSenderId ? config.messagingSenderId.trim() : undefined,
+    projectName: config.projectName ? config.projectName.trim() : config.projectId.trim(),
+    isCustom: true,
+  };
+
+  // Save to browser
+  localStorage.setItem('ninimo_custom_firebase_config', JSON.stringify(cleanConfig));
+
+  // Save to server volume if online
+  try {
+    await fetch('/api/firebase/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cleanConfig),
+    });
+  } catch {}
+
+  // Reload window to apply freshly initialized Firebase SDK instances cleanly
+  window.location.reload();
+}
+
+/**
+ * Reset Firebase configuration to system default
+ */
+export async function resetFirebaseConfig(): Promise<void> {
+  localStorage.removeItem('ninimo_custom_firebase_config');
+  try {
+    await fetch('/api/firebase/config/reset', { method: 'POST' });
+  } catch {}
+  window.location.reload();
+}
 
 /**
  * Sync user profile to Firestore `/users/{uid}`
@@ -58,7 +192,7 @@ export async function syncUserToFirestore(user: FirebaseUser, customUsername?: s
       emailLower === 'gamershifin75@gmail.com' ||
       emailLower === 'shifin67e@gmail.com' ||
       username.toLowerCase() === 'shifin';
-    
+
     if (!existing.exists()) {
       await setDoc(userRef, {
         id: user.uid,
@@ -98,6 +232,7 @@ export {
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInAnonymously,
   firebaseSignOut,
   onAuthStateChanged,
   updateProfile,
